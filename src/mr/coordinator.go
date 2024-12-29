@@ -19,7 +19,7 @@ type Coordinator struct {
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
+func (c *Coordinator) Example(args *WorkerReqArgs, reply *CoordinatorReply) error {
 	if args.Status == 0 {
 		reply.Filename = "Example"
 		reply.TaskID = 123
@@ -67,6 +67,14 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	// Your code here. we create nReduce workers
 	c.status = make([]int, nReduce)
+
+	// go routine for our scheduling our workers
+	// we need to allow our m workers to run
+	// available files (to map) should be stored in a queue for a given rpc worker to consume (lock on queue read/write)
+
+	//we also need a way to prevent any reduce task from running on an incomplete intermediate file
+
+	//how to put a lock over a file? multiple workers will be wanting to file (hashkey) at once
 
 	c.server()
 	return &c

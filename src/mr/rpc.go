@@ -16,12 +16,13 @@ import (
 // and reply for an RPC.
 //
 
-type ExampleArgs struct {
+type WorkerReqArgs struct {
 	Status int
 }
 
-type ExampleReply struct {
+type CoordinatorReply struct {
 	TaskID   int
+	TaskType string
 	Filename string
 }
 
