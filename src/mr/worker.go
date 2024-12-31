@@ -1,16 +1,17 @@
 package mr
 
 import (
-	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"log"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Map functions return a slice of KeyValue.
@@ -19,8 +20,7 @@ type KeyValue struct {
 	Value string
 }
 
-var nReduce = -1
-var workerStatus = "READY"
+var nReduce = 10
 
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -33,17 +33,30 @@ func ihash(key string) int {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	retries := 0
 
 	for {
 		//TODO make this a goroutine loop so worker stays running and receives task
 		response := ReadyToWork()
 		errRes := CoordinatorReply{}
 
+		//no job right now, try again in a sec
 		if response == errRes {
+			if retries < 3 {
+				time.Sleep(time.Second * 2)
+				retries++
+				continue
+			} else {
+				break
+			}
+		}
+
+		//jobs are complete!!
+		if response.TaskID == -1 {
 			break
 		}
 
-		nReduce = response.NReduce
+		//nReduce = response.NReduce
 		if response.TaskType == "MAP" {
 			ok := HandleMap(response.TaskID, response.Filename, mapf)
 
@@ -55,9 +68,8 @@ func Worker(mapf func(string, string) []KeyValue,
 
 			ReportJobStatus(ok, response.Filename, response.TaskID)
 		}
-
-		//time.Sleep(time.Millisecond * 100)
 	}
+	fmt.Println("worker-node exiting.")
 }
 
 func HandleMap(id int, filename string, mapf func(string, string) []KeyValue) bool {
@@ -65,21 +77,21 @@ func HandleMap(id int, filename string, mapf func(string, string) []KeyValue) bo
 
 	kva := mapf(filename, string(content))
 
-	WriteIntermediateFiles(kva)
+	WriteIntermediateFiles(id, kva)
 	return true
 }
 
 func HandleReduce(reduceNumber int, reducef func(string, []string) string) bool {
 	//read intermediate file and split
 	filename := "mr-intermediate-" + strconv.Itoa(reduceNumber)
-	rawInput := string(ReadFileAsByteArr(filename))
+	rawInput := string(ReadIntermediateFiles(strconv.Itoa(reduceNumber)))
 	splitInput := strings.Split(rawInput, "\n")
 
 	intermediate := make([]KeyValue, 0)
 	for _, line := range splitInput {
 		tmp := strings.Split(line, " ")
 
-		if len(tmp) > 1 {
+		if len(tmp) == 2 {
 			k := tmp[0]
 			v := tmp[1]
 
@@ -111,6 +123,7 @@ func HandleReduce(reduceNumber int, reducef func(string, []string) string) bool 
 		}
 
 		output := reducef(intermediate[i].Key, values)
+
 		fmt.Fprintf(file, "%v %v\n", intermediate[i].Key, output)
 
 		i = j
@@ -135,45 +148,36 @@ func ReadFileAsByteArr(filename string) []byte {
 	return content
 }
 
-// big assumption here is calling os.file.Writestring always appends to the end of a file, even if that file has been modified by another worker!!
-// this is only tested in 'append' mode on the linux write() syscall
-// since every write() is on it's own line and order doesn't matter this works for our case, it wouldn't if two writes could interweave on a line
-func WriteIntermediateFiles(content []KeyValue) {
-	//we need new files for each key val using ihash
+func WriteIntermediateFiles(mapId int, content []KeyValue) {
+	//we need new files for each reduce option, key val using ihash
+	fileOutput := make([]string, nReduce)
 	for _, line := range content {
-		filename := "mr-intermediate-" + strconv.Itoa(ihash(line.Key)%nReduce)
+		index := ihash(line.Key) % nReduce
 
-		f, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
-		defer f.Close()
+		fileOutput[index] += (line.Key + " " + line.Value + "\n")
+	}
 
-		_, err = f.WriteString(line.Key + " " + line.Value + "\n")
+	for reduceN, line := range fileOutput {
+		filename := "mr-intermediate-" + strconv.Itoa(mapId) + "-" + strconv.Itoa(reduceN)
 
-		//TODO: handle errors with retry?
+		err := os.WriteFile(filename, []byte(line), 0644)
 		if err != nil {
 			fmt.Println("intermediate-file write error", err)
 		}
+
+		//TODO: handle errors with retry?
 	}
 }
 
-func ReadIntermediateFile(filename string) []KeyValue {
-	file, err := os.Open(filename)
-	if err != nil {
-		log.Fatalf("cannot open %v", filename)
-	}
-	defer file.Close()
+func ReadIntermediateFiles(reduceID string) []byte {
+	matches, _ := filepath.Glob("mr-intermediate-*-" + reduceID)
 
-	dec := json.NewDecoder(file)
-	kva := make([]KeyValue, 0)
-
-	for {
-		var kv KeyValue
-		if err := dec.Decode(&kv); err != nil {
-			break
-		}
-		kva = append(kva, kv)
+	res := make([]byte, 0)
+	for _, path := range matches {
+		res = append(res, ReadFileAsByteArr(path)...)
 	}
 
-	return kva
+	return res
 }
 
 func WriteOutputFile(filename string, content []KeyValue) {
@@ -202,7 +206,6 @@ func ReadyToWork() CoordinatorReply {
 	ok := call("Coordinator.GetNextJob", &args, &reply)
 
 	if ok {
-		//fmt.Printf("reply %v %v %v\n", reply.TaskID, reply.TaskType, reply.Filename)
 		return reply
 	} else {
 		fmt.Printf("job request to coordinator failed!\n")

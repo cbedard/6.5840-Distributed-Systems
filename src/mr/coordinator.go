@@ -12,25 +12,35 @@ import (
 
 type Coordinator struct {
 	// Your definitions here.
-	status      []int    //status of each job -- 0 in progress, 1 finished, -1 failure
-	mapQueue    []string //filenames to map
-	reduceQueue []bool   //reduce jobs to send out
-	mu          sync.Mutex
+	status            []int    //status of each job -- 0 in progress, 1 finished, -1 failure
+	mapQueue          []string //filenames to map
+	reduceQueue       []bool   //reduce jobs to send out
+	mu                sync.Mutex
+	mapJobId          int
+	mapCompletedCount int
 }
 
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) GetNextJob(args *WorkerReqArgs, reply *CoordinatorReply) error {
 	c.mu.Lock()
 
+	if len(c.mapQueue) == 0 && c.mapCompletedCount != c.mapJobId {
+		c.mu.Unlock()
+		return nil
+	}
+
 	if len(c.mapQueue) > 0 {
 		//all maps must go first
 		reply.TaskType = "MAP"
 		reply.NReduce = len(c.reduceQueue)
 
+		reply.TaskID = c.mapJobId
+		c.mapJobId++
+
 		reply.Filename = c.mapQueue[0]
 		c.mapQueue = c.mapQueue[1:]
 
-	} else if slices.Contains(c.reduceQueue, false) {
+	} else if slices.Contains(c.reduceQueue, false) && c.mapCompletedCount == c.mapJobId {
 		//we schedule reduce jobs
 		reply.TaskType = "REDUCE"
 		reply.NReduce = len(c.reduceQueue)
@@ -42,6 +52,8 @@ func (c *Coordinator) GetNextJob(args *WorkerReqArgs, reply *CoordinatorReply) e
 				break
 			}
 		}
+	} else if !slices.Contains(c.reduceQueue, false) {
+		reply.TaskID = -1
 	}
 
 	c.mu.Unlock()
@@ -58,6 +70,8 @@ func (c *Coordinator) ReportJobStatus(args *WorkerReqArgs, reply *CoordinatorRep
 		} else {
 			c.reduceQueue[args.ReduceJob] = false
 		}
+	} else if args.Filename != "" {
+		c.mapCompletedCount++
 	}
 
 	c.mu.Unlock()
