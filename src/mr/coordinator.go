@@ -6,24 +6,61 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"slices"
+	"sync"
 )
 
 type Coordinator struct {
 	// Your definitions here.
-	status []int //status of each job -- 0 in progress, 1 finished, -1 failure
-
+	status      []int    //status of each job -- 0 in progress, 1 finished, -1 failure
+	mapQueue    []string //filenames to map
+	reduceQueue []bool   //reduce jobs to send out
+	mu          sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
+func (c *Coordinator) GetNextJob(args *WorkerReqArgs, reply *CoordinatorReply) error {
+	c.mu.Lock()
 
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *WorkerReqArgs, reply *CoordinatorReply) error {
-	if args.Status == 0 {
-		reply.Filename = "Example"
-		reply.TaskID = 123
+	if len(c.mapQueue) > 0 {
+		//all maps must go first
+		reply.TaskType = "MAP"
+		reply.NReduce = len(c.reduceQueue)
+
+		reply.Filename = c.mapQueue[0]
+		c.mapQueue = c.mapQueue[1:]
+
+	} else if slices.Contains(c.reduceQueue, false) {
+		//we schedule reduce jobs
+		reply.TaskType = "REDUCE"
+		reply.NReduce = len(c.reduceQueue)
+
+		for i := range c.reduceQueue {
+			if !c.reduceQueue[i] {
+				reply.TaskID = i
+				c.reduceQueue[i] = true
+				break
+			}
+		}
 	}
+
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *Coordinator) ReportJobStatus(args *WorkerReqArgs, reply *CoordinatorReply) error {
+	c.mu.Lock()
+
+	if args.Status != 1 {
+		//job fail, add data back to the queues
+		if args.Filename != "" {
+			c.mapQueue = append(c.mapQueue, args.Filename)
+		} else {
+			c.reduceQueue[args.ReduceJob] = false
+		}
+	}
+
+	c.mu.Unlock()
 	return nil
 }
 
@@ -65,16 +102,9 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	// Your code here. we create nReduce workers
-	c.status = make([]int, nReduce)
-
-	// go routine for our scheduling our workers
-	// we need to allow our m workers to run
-	// available files (to map) should be stored in a queue for a given rpc worker to consume (lock on queue read/write)
-
-	//we also need a way to prevent any reduce task from running on an incomplete intermediate file
-
-	//how to put a lock over a file? multiple workers will be wanting to file (hashkey) at once
+	// Your code here.
+	c.mapQueue = files
+	c.reduceQueue = make([]bool, nReduce)
 
 	c.server()
 	return &c

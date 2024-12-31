@@ -17,13 +17,16 @@ import (
 //
 
 type WorkerReqArgs struct {
-	Status int
+	Status    int    //READY: 0, DONE: 1, FAILED: -1
+	Filename  string //only used if status = 1/-1 and we are reporting a map result
+	ReduceJob int    //only used if status = 1/-1 and we are reporting a reduce result
 }
 
 type CoordinatorReply struct {
 	TaskID   int
 	TaskType string
 	Filename string
+	NReduce  int
 }
 
 // Add your RPC definitions here.
