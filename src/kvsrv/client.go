@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/big"
 	"net/rpc"
+	"os"
 
 	"6.5840/labrpc"
 )
@@ -40,8 +41,19 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+	args := GetArgs{key, "0"}
+	reply := GetReply{}
 
-	// You will have to modify this function.
+	// send the RPC request, wait for the reply.
+	ok := call("KVServer.Get", &args, &reply)
+
+	if ok {
+		return reply.Value
+	} else {
+		fmt.Printf("job request to server failed!\n")
+		os.Exit(0)
+	}
+
 	return ""
 }
 
@@ -54,7 +66,19 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
-	// You will have to modify this function.
+	args := PutAppendArgs{key, value, "0"}
+	reply := PutAppendReply{}
+
+	// send the RPC request, wait for the reply.
+	ok := call("KVServer."+op, &args, &reply)
+
+	if ok {
+		return reply.Value
+	} else {
+		fmt.Printf("job request to server failed!\n")
+		os.Exit(0)
+	}
+
 	return ""
 }
 
@@ -67,7 +91,7 @@ func (ck *Clerk) Append(key string, value string) string {
 	return ck.PutAppend(key, value, "Append")
 }
 
-// send an RPC request to the coordinator, wait for the response.
+// send an RPC request to the cserver, wait for the response.
 // usually returns true.
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {

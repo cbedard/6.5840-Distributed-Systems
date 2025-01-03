@@ -22,24 +22,39 @@ type KVServer struct {
 	mu sync.Mutex
 
 	// Your definitions here.
+	m map[string]string
 }
 
-func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
-	// Your code here.
+func (kv *KVServer) Get(args *GetArgs, reply *GetReply) error {
+	kv.mu.Lock()
+	val := kv.m[args.Key]
+
+	reply.Value = val
+
+	kv.mu.Unlock()
+	return nil
 }
 
-func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) error {
+	kv.mu.Lock()
+
+	kv.m[args.Key] = args.Value
+
+	kv.mu.Unlock()
+	return nil
 }
 
-func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
-	// Your code here.
+func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) error {
+	kv.mu.Lock()
+
+	reply.Value = kv.m[args.Key]
+	kv.m[args.Key] += args.Value
+
+	kv.mu.Unlock()
+	return nil
 }
 
-func StartKVServer() *KVServer {
-	kv := new(KVServer)
-
-	// You may need initialization code here.
+func (kv *KVServer) server() {
 	rpc.Register(kv)
 	rpc.HandleHTTP()
 	//l, e := net.Listen("tcp", ":1234")
@@ -52,6 +67,12 @@ func StartKVServer() *KVServer {
 	}
 
 	go http.Serve(l, nil)
+}
 
-	return kv
+func StartKVServer() *KVServer {
+	kv := KVServer{}
+	kv.m = make(map[string]string)
+
+	kv.server()
+	return &kv
 }
