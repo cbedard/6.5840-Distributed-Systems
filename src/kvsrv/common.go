@@ -1,12 +1,18 @@
 package kvsrv
 
+import (
+	"os"
+	"strconv"
+)
+
+// Field names must start with capital letters,
+// otherwise RPC will break.
+
 // Put or Append
 type PutAppendArgs struct {
 	Key   string
 	Value string
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
+	ReqId string
 }
 
 type PutAppendReply struct {
@@ -14,10 +20,16 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Key   string
+	ReqId string
 }
 
 type GetReply struct {
 	Value string
+}
+
+func serverSock() string {
+	s := "/var/tmp/5840-kvsrv-"
+	s += strconv.Itoa(os.Getuid())
+	return s
 }
