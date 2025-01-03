@@ -12,7 +12,7 @@ import (
 type PutAppendArgs struct {
 	Key   string
 	Value string
-	ReqId string
+	ReqId int64
 }
 
 type PutAppendReply struct {

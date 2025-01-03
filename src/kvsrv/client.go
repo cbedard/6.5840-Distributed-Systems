@@ -3,9 +3,7 @@ package kvsrv
 import (
 	"crypto/rand"
 	"fmt"
-	"log"
 	"math/big"
-	"net/rpc"
 	"os"
 
 	"6.5840/labrpc"
@@ -45,7 +43,7 @@ func (ck *Clerk) Get(key string) string {
 	reply := GetReply{}
 
 	// send the RPC request, wait for the reply.
-	ok := call("KVServer.Get", &args, &reply)
+	ok := ck.server.Call("KVServer.Get", &args, &reply)
 
 	if ok {
 		return reply.Value
@@ -66,16 +64,17 @@ func (ck *Clerk) Get(key string) string {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) string {
-	args := PutAppendArgs{key, value, "0"}
+	reqId := nrand()
+	args := PutAppendArgs{key, value, reqId}
 	reply := PutAppendReply{}
 
 	// send the RPC request, wait for the reply.
-	ok := call("KVServer."+op, &args, &reply)
+	ok := ck.server.Call("KVServer."+op, &args, &reply)
 
 	if ok {
 		return reply.Value
 	} else {
-		fmt.Printf("job request to server failed!\n")
+		fmt.Printf("request to server failed!\n")
 		os.Exit(0)
 	}
 
@@ -89,25 +88,4 @@ func (ck *Clerk) Put(key string, value string) {
 // Append value to key's value and return that value
 func (ck *Clerk) Append(key string, value string) string {
 	return ck.PutAppend(key, value, "Append")
-}
-
-// send an RPC request to the cserver, wait for the response.
-// usually returns true.
-// returns false if something goes wrong.
-func call(rpcname string, args interface{}, reply interface{}) bool {
-	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	sockname := serverSock()
-	c, err := rpc.DialHTTP("unix", sockname)
-	if err != nil {
-		log.Fatal("dialing:", err)
-	}
-	defer c.Close()
-
-	err = c.Call(rpcname, args, reply)
-	if err == nil {
-		return true
-	}
-
-	fmt.Println(err)
-	return false
 }
