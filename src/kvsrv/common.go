@@ -1,10 +1,5 @@
 package kvsrv
 
-import (
-	"os"
-	"strconv"
-)
-
 // Field names must start with capital letters,
 // otherwise RPC will break.
 
@@ -28,8 +23,10 @@ type GetReply struct {
 	Value string
 }
 
-func serverSock() string {
-	s := "/var/tmp/5840-kvsrv-"
-	s += strconv.Itoa(os.Getuid())
-	return s
+type ConfirmArgs struct {
+	ReqId int64
+}
+
+type ConfirmReply struct {
+	Ok bool
 }

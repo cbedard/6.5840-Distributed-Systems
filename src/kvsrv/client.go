@@ -2,16 +2,15 @@ package kvsrv
 
 import (
 	"crypto/rand"
-	"fmt"
 	"math/big"
-	"os"
 
 	"6.5840/labrpc"
 )
 
 type Clerk struct {
 	server *labrpc.ClientEnd
-	// You will have to modify this struct.
+	//mu     sync.Mutex
+	//appendOrder
 }
 
 func nrand() int64 {
@@ -39,6 +38,7 @@ func MakeClerk(server *labrpc.ClientEnd) *Clerk {
 // must match the declared types of the RPC handler function's
 // arguments. and reply must be passed as a pointer.
 func (ck *Clerk) Get(key string) string {
+
 	args := GetArgs{key, "0"}
 	reply := GetReply{}
 
@@ -48,11 +48,14 @@ func (ck *Clerk) Get(key string) string {
 	if ok {
 		return reply.Value
 	} else {
-		fmt.Printf("job request to server failed!\n")
-		os.Exit(0)
+		for !ok {
+			args = GetArgs{key, "0"}
+			reply = GetReply{}
+			ok = ck.server.Call("KVServer.Get", &args, &reply)
+		}
 	}
 
-	return ""
+	return reply.Value
 }
 
 // shared by Put and Append.
@@ -71,14 +74,17 @@ func (ck *Clerk) PutAppend(key string, value string, op string) string {
 	// send the RPC request, wait for the reply.
 	ok := ck.server.Call("KVServer."+op, &args, &reply)
 
-	if ok {
-		return reply.Value
-	} else {
-		fmt.Printf("request to server failed!\n")
-		os.Exit(0)
+	for !ok {
+		args = PutAppendArgs{key, value, reqId}
+		reply = PutAppendReply{}
+		ok = ck.server.Call("KVServer."+op, &args, &reply)
 	}
 
-	return ""
+	delArgs := ConfirmArgs{reqId}
+	delReply := ConfirmReply{}
+	_ = ck.server.Call("KVServer.DeleteHistory", &delArgs, &delReply)
+
+	return reply.Value
 }
 
 func (ck *Clerk) Put(key string, value string) {

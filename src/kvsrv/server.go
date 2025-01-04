@@ -17,13 +17,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 type KVServer struct {
 	mu         sync.Mutex
 	m          map[string]string
-	reqHistory map[int64]bool
+	reqHistory map[int64]string
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	kv.mu.Lock()
-	val := kv.m[args.Key]
 
+	val := kv.m[args.Key]
 	reply.Value = val
 
 	kv.mu.Unlock()
@@ -31,33 +31,47 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 
 func (kv *KVServer) Put(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
-	if kv.reqHistory[args.ReqId] {
-		return
-	}
 
-	kv.m[args.Key] = args.Value
-	kv.reqHistory[args.ReqId] = true
+	old, ok := kv.reqHistory[args.ReqId]
+
+	if !ok {
+		kv.m[args.Key] = args.Value
+		kv.reqHistory[args.ReqId] = args.Value
+	} else {
+		reply.Value = old
+	}
 
 	kv.mu.Unlock()
 }
 
 func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Lock()
-	if kv.reqHistory[args.ReqId] {
-		return
+
+	old, ok := kv.reqHistory[args.ReqId]
+
+	if !ok {
+
+		reply.Value = kv.m[args.Key]
+		kv.reqHistory[args.ReqId] = reply.Value
+
+		kv.m[args.Key] += args.Value
+	} else {
+		reply.Value = old
 	}
 
-	reply.Value = kv.m[args.Key]
-	kv.m[args.Key] += args.Value
-	kv.reqHistory[args.ReqId] = true
+	kv.mu.Unlock()
+}
 
+func (kv *KVServer) DeleteHistory(args *ConfirmArgs, reply *ConfirmReply) {
+	kv.mu.Lock()
+	delete(kv.reqHistory, args.ReqId)
 	kv.mu.Unlock()
 }
 
 func StartKVServer() *KVServer {
 	kv := KVServer{}
 	kv.m = map[string]string{}
-	kv.reqHistory = map[int64]bool{}
+	kv.reqHistory = map[int64]string{}
 
 	return &kv
 }
