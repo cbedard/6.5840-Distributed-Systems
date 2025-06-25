@@ -1,6 +1,6 @@
 # 6.5840 - Distributed-Systems
 
-Collection of labs from MIT's upper-undergrad/graduate distributed systems course, previously coded as 6.824. All labs are written in Go and have a set of tests and tooling for simulating distributed environments and verifying program correctness. I'm using the edition of the course published in Spring 2024 ([archive link](http://nil.csail.mit.edu/6.5840/2024/)), with lectures from 2020 ([link](https://www.youtube.com/@6.824/videos)). Big thank you to MIT for open-sourcing incredibly high quality learning resources like this.
+Collection of labs from MIT's upper-undergrad/graduate distributed systems course, previously coded as 6.824. All labs are written in Go and have a set of tests and tooling for simulating netowrks with delays or dropped packets. I'm using the edition of the course published in Spring 2024 ([archive link](http://nil.csail.mit.edu/6.5840/2024/)), with lectures from 2020 ([link](https://www.youtube.com/@6.824/videos)). Big thank you to MIT for open-sourcing incredibly high quality learning resources like this.
 
 ## Labs
 ### Lab 1: MapReduce
