@@ -19,6 +19,7 @@ package raft
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -216,6 +217,7 @@ func (rf *Raft) gatherVotes() bool {
 	defer cancel()
 
 	// Send RequestVote RPCs to all peers
+	rf.mu.Lock()
 	for i := range rf.peers {
 		if rf.me != i {
 			go func(peer, term, candidateId, lastLogIndex, lastLogTerm int) {
@@ -233,6 +235,7 @@ func (rf *Raft) gatherVotes() bool {
 			}(i, rf.currentTerm, rf.me, rf.lastApplied, 0)
 		}
 	}
+	rf.mu.Unlock()
 
 	// Wait for votes with early termination
 	yesVotes := 1
@@ -267,21 +270,55 @@ func (rf *Raft) gatherVotes() bool {
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	/*
+		Receiver implementation:
+		yes 1. Reply false if term < currentTerm (§5.1)
+		yes 2. Reply false if log doesn’t contain an entry at prevLogIndex whose term matches prevLogTerm (§5.3)
+		yes 3. If an existing entry conflicts with a new one (same index but different terms), delete the
+			existing entry and all that follow it (§5.3)
+		yes 4. Append any new entries not already in log
+		5. If leaderCommit > commitIndex, set commitIndex = min(leaderCommit, index of last new entry)
+	*/
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if args.Term >= rf.currentTerm {
-		//TODO: if term is higher that means we likely missed entries
-		rf.lastHeartbeatTime = time.Now()
-		rf.state = "FOLLOWER"
-		rf.currentTerm = args.Term
-		rf.votedFor = -1
 
-		reply.Success = true
-		reply.Term = rf.currentTerm
-	} else {
+	if args.Term < rf.currentTerm || (args.PrevLogIndex < len(rf.log) && rf.log[args.PrevLogIndex].SnapshotTerm != args.PrevLogTerm) {
 		reply.Success = false
 		reply.Term = rf.currentTerm
+		return
 	}
+
+	if args.PrevLogIndex < len(rf.log) && rf.log[args.PrevLogIndex].SnapshotTerm != args.PrevLogTerm {
+		// delete mismatched log and everything after it
+		rf.log = rf.log[:args.PrevLogIndex-1]
+	}
+
+	fmt.Println("node", rf.me, rf.state, "log length:", len(rf.log), rf.commitIndex, "args prevLogIndex:", args.PrevLogIndex)
+	for _, entry := range args.Entries {
+		newMsg := ApplyMsg{
+			true,
+			entry,
+			rf.commitIndex + 1,
+			true,
+			[]byte{},
+			args.Term,
+			rf.commitIndex + 1,
+		}
+		rf.commitIndex++
+		rf.log = append(rf.log, newMsg)
+	}
+
+	if args.LeaderCommitIndex > rf.commitIndex {
+		rf.commitIndex = min(args.LeaderCommitIndex, rf.commitIndex)
+	}
+	//TODO: if term is higher that means we likely missed entries
+	rf.lastHeartbeatTime = time.Now()
+	rf.state = "FOLLOWER"
+	rf.currentTerm = args.Term
+	rf.votedFor = -1
+
+	reply.Success = true
+	reply.Term = rf.currentTerm
 }
 
 // Start the service using Raft (e.g., a k/v server) wants to start agreement on the next command
