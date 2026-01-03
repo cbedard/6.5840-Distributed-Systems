@@ -18,13 +18,14 @@ package raft
 //
 
 import (
+	"bytes"
 	"context"
 	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	//	"6.5840/labgob"
+	"6.5840/labgob"
 	"6.5840/labrpc"
 )
 
@@ -85,42 +86,40 @@ func (rf *Raft) GetState() (int, bool) {
 	return rf.currentTerm, rf.state == "LEADER"
 }
 
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
+// persist Raft's persistent state to stable storage, where it can later be retrieved after a crash and restart.
 // see paper's Figure 2 for a description of what should be persistent.
-// before you've implemented snapshots, you should pass nil as the
-// second argument to persister.Save().
-// after you've implemented snapshots, pass the current snapshot
-// (or nil if there's not yet a snapshot).
+// before you've implemented snapshots, you should pass nil as the second argument to persister.Save().
+// is meant to capture value changes in Raft struct so should be called while holding rf.mu
 func (rf *Raft) persist() {
-	// Your code here (3C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// raftstate := w.Bytes()
-	// rf.persister.Save(raftstate, nil)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+
+	raftstate := w.Bytes()
+	rf.persister.Save(raftstate, nil)
 }
 
 // restore previously persisted state.
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if len(data) < 1 { // bootstrap without any state
 		return
 	}
-	// Your code here (3C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var currentTerm int
+	var votedFor int
+	var log []LogEntry
+	if d.Decode(&currentTerm) != nil || d.Decode(&votedFor) != nil || d.Decode(&log) != nil {
+		panic("ERROR Decoding")
+	} else {
+		rf.currentTerm = currentTerm
+		rf.votedFor = votedFor
+		rf.log = log
+	}
 }
 
 // Snapshot the service says it has created a snapshot that has all info up to and including index.
@@ -155,6 +154,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	reply.Term = rf.currentTerm
+	rf.persist() // this is greedy, we could be calling it every time term or voted for changes
 }
 
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
@@ -209,6 +209,7 @@ func (rf *Raft) SendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 			rf.currentTerm = reply.Term
 			rf.state = "FOLLOWER"
 			rf.votedFor = -1
+			rf.persist()
 			rf.mu.Unlock()
 			return false
 		}
@@ -298,6 +299,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.currentTerm = args.Term
 		rf.state = "FOLLOWER"
 		rf.votedFor = -1
+		rf.persist()
 	}
 
 	// Log consistency check, only time conflictIndex is set
@@ -321,6 +323,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			rf.log = append(rf.log, entry)
 		}
 	}
+	rf.persist()
 
 	// Update commitIndex if leader is ahead
 	if args.LeaderCommitIndex > rf.commitIndex {
@@ -358,6 +361,7 @@ func (rf *Raft) Start(command any) (int, int, bool) {
 	rf.log = append(rf.log, newEntry)
 	index := len(rf.log) - 1
 	term := rf.currentTerm
+	rf.persist()
 
 	// immediate broadcast -> faster replication
 	rf.broadcastEntries()
@@ -413,6 +417,7 @@ func (rf *Raft) applier() {
 				CommandIndex: startIdx + 1 + i,
 			}
 		}
+		//fmt.Println(rf.me, rf.state, rf.log)
 		rf.mu.Lock()
 	}
 }
@@ -457,6 +462,7 @@ func (rf *Raft) ticker() {
 				rf.state = "CANDIDATE"
 				rf.currentTerm++
 				rf.votedFor = rf.me
+				rf.persist()
 				rf.mu.Unlock()
 
 				electionWon := rf.gatherVotes()
@@ -475,7 +481,8 @@ func (rf *Raft) ticker() {
 				} else {
 					rf.state = "FOLLOWER"
 				}
-				rf.votedFor = -1
+
+				rf.persist()
 				rf.mu.Unlock()
 			} else {
 				rf.mu.Unlock()
@@ -515,6 +522,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	// init from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
+	// TODO: make sure we don't double commit entries if restoring from state
+	// lastApplied & commitIndex curr 0.
+
 	// background goroutines
 	go rf.ticker()
 	go rf.applier()
