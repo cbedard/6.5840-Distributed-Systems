@@ -29,5 +29,5 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term          int
 	Success       bool
-	ConflictIndex int // if exists
+	ConflictIndex int // for fast backup
 }
