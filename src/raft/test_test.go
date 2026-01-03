@@ -8,12 +8,14 @@ package raft
 // test with the original before submitting.
 //
 
-import "testing"
-import "fmt"
-import "time"
-import "math/rand"
-import "sync/atomic"
-import "sync"
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+)
 
 // The tester generously allows solutions to complete elections in one second
 // (much more than the paper's range of timeouts).
@@ -235,8 +237,7 @@ func TestLeaderFailure3B(t *testing.T) {
 	leader1 := cfg.checkOneLeader()
 	cfg.disconnect(leader1)
 
-	// the remaining followers should elect
-	// a new leader.
+	// the remaining followers should elect a new leader.
 	cfg.one(102, servers-1, false)
 	time.Sleep(RaftElectionTimeout)
 	cfg.one(103, servers-1, false)
@@ -261,8 +262,7 @@ func TestLeaderFailure3B(t *testing.T) {
 	cfg.end()
 }
 
-// test that a follower participates after
-// disconnect and re-connect.
+// test that a follower participates after disconnect and re-connect.
 func TestFailAgree3B(t *testing.T) {
 	servers := 3
 	cfg := make_config(t, servers, false, false)
