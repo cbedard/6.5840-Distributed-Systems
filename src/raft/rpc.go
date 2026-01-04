@@ -31,3 +31,16 @@ type AppendEntriesReply struct {
 	Success       bool
 	ConflictIndex int // for fast backup
 }
+
+// skipping offset & done fields on the advice of the hint section in 3D
+type InstallSnapshotArgs struct {
+	Term         int
+	LeaderId     int
+	LastLogIndex int
+	LastLogTerm  int
+	Data         []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
+}
