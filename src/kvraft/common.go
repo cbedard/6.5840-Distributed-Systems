@@ -8,25 +8,36 @@ const (
 
 type Err string
 
+type CommonReply struct {
+	Err        Err
+	LeaderHint int
+}
+
+func (r *CommonReply) GetErr() Err        { return r.Err }
+func (r *CommonReply) GetLeaderHint() int { return r.LeaderHint }
+
+type Reply interface {
+	GetErr() Err
+	GetLeaderHint() int
+}
+
 // Put or Append
 type PutAppendArgs struct {
+	Uuid  int
 	Key   string
 	Value string
-	// You'll have to add definitions here.
-	// Field names must start with capital letters,
-	// otherwise RPC will break.
 }
 
 type PutAppendReply struct {
-	Err Err
+	CommonReply
 }
 
 type GetArgs struct {
-	Key string
-	// You'll have to add definitions here.
+	Uuid int
+	Key  string
 }
 
 type GetReply struct {
-	Err   Err
+	CommonReply
 	Value string
 }
