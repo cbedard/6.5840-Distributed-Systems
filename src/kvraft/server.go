@@ -1,6 +1,7 @@
 package kvraft
 
 import (
+	"bytes"
 	"log"
 	"sync"
 	"sync/atomic"
@@ -20,10 +21,11 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 }
 
 type Op struct {
-	Uuid  int
-	Type  string
-	Key   string
-	Value string
+	ClientId  int
+	RequestId int
+	Type      string
+	Key       string
+	Value     string
 }
 
 type KVServer struct {
@@ -36,19 +38,19 @@ type KVServer struct {
 	maxraftstate int // snapshot if log grows this big
 	db           map[string]string
 	waitingOps   map[int]chan Op // operations waiting to be commited by raft layer
-	comittedHist map[int]bool    // dupe detection on retries from client layer
+	processed    map[int]int     // clientId -> last processed requestId
 }
 
 func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	kv.Lock()
-	if kv.comittedHist[args.Uuid] {
+	if args.RequestId <= kv.processed[args.ClientId] {
 		reply.Value = kv.db[args.Key] // already commited
 		reply.Err = OK
 		kv.Unlock()
 		return
 	}
 
-	commandIndex, _, isLeader := kv.rf.Start(Op{args.Uuid, "Get", args.Key, ""})
+	commandIndex, _, isLeader := kv.rf.Start(Op{args.ClientId, args.RequestId, "Get", args.Key, ""})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 		kv.Unlock()
@@ -60,7 +62,7 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	kv.Unlock()
 
 	commitedOp := <-ch
-	if commitedOp.Uuid == args.Uuid {
+	if commitedOp.ClientId == args.ClientId && commitedOp.RequestId == args.RequestId {
 		reply.Value = commitedOp.Value
 		reply.Err = OK
 	} else {
@@ -78,13 +80,13 @@ func (kv *KVServer) Append(args *PutAppendArgs, reply *PutAppendReply) {
 
 func (kv *KVServer) putAppend(args *PutAppendArgs, reply *PutAppendReply, opType string) {
 	kv.Lock()
-	if kv.comittedHist[args.Uuid] {
+	if args.RequestId <= kv.processed[args.ClientId] {
 		reply.Err = OK // already commited
 		kv.Unlock()
 		return
 	}
 
-	commandIndex, _, isLeader := kv.rf.Start(Op{args.Uuid, opType, args.Key, args.Value})
+	commandIndex, _, isLeader := kv.rf.Start(Op{args.ClientId, args.RequestId, opType, args.Key, args.Value})
 	if !isLeader {
 		reply.Err = ErrWrongLeader
 		kv.Unlock()
@@ -96,7 +98,7 @@ func (kv *KVServer) putAppend(args *PutAppendArgs, reply *PutAppendReply, opType
 	kv.Unlock()
 
 	commitedOp := <-ch
-	if commitedOp.Uuid == args.Uuid {
+	if commitedOp.ClientId == args.ClientId && commitedOp.RequestId == args.RequestId {
 		reply.Err = OK
 	} else {
 		reply.Err = ErrWrongLeader
@@ -105,11 +107,15 @@ func (kv *KVServer) putAppend(args *PutAppendArgs, reply *PutAppendReply, opType
 
 func (kv *KVServer) ApplyOperations() {
 	for msg := range kv.applyCh {
-		if msg.CommandValid {
-			kv.Lock()
+		kv.Lock()
+		if msg.SnapshotValid {
+			// restore state from snapshot
+			kv.decodeSnapshot(msg.Snapshot)
 
+		} else if msg.CommandValid {
 			op := msg.Command.(Op)
-			if !kv.comittedHist[op.Uuid] {
+
+			if op.RequestId > kv.processed[op.ClientId] {
 				if op.Type == "Put" {
 					kv.db[op.Key] = op.Value
 				}
@@ -117,23 +123,55 @@ func (kv *KVServer) ApplyOperations() {
 					kv.db[op.Key] += op.Value
 				}
 
-				kv.comittedHist[op.Uuid] = true
+				kv.processed[op.ClientId] = op.RequestId
 			}
 
-			// we should still rspond to get commands even if dupe, to unblock waiting goroutines
 			if op.Type == "Get" {
 				op.Value, _ = kv.db[op.Key]
 			}
 
+			// because a commited operation may have dropped on the way back to client,
+			// can dupe the response as long as we dont dupe the write op
 			if ch, ok := kv.waitingOps[msg.CommandIndex]; ok {
 				ch <- op
 				delete(kv.waitingOps, msg.CommandIndex)
 			}
 
-			kv.Unlock()
+			// hit max rf state, take snapshot
+			if kv.maxraftstate != -1 && kv.rf.RaftStateSize() >= kv.maxraftstate {
+				snapshot := kv.encodeSnapshot()
+				kv.rf.Snapshot(msg.CommandIndex, snapshot)
+			}
 		}
-		// TODO: snapshots
+
+		kv.Unlock()
 	}
+}
+
+// must be called with lock
+func (kv *KVServer) encodeSnapshot() []byte {
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(kv.db)
+	e.Encode(kv.processed)
+
+	return w.Bytes()
+}
+
+// must be called with lock
+func (kv *KVServer) decodeSnapshot(data []byte) {
+
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+
+	var db map[string]string
+	var processed map[int]int
+	if d.Decode(&db) != nil || d.Decode(&processed) != nil {
+		panic("ERROR Decoding")
+	}
+
+	kv.db = db
+	kv.processed = processed
 }
 
 // The tester calls Kill() when a KVServer instance won't be needed again. For
@@ -145,7 +183,6 @@ func (kv *KVServer) ApplyOperations() {
 func (kv *KVServer) Kill() {
 	atomic.StoreInt32(&kv.dead, 1)
 	kv.rf.Kill()
-	// Your code here, if desired.
 }
 
 func (kv *KVServer) killed() bool {
@@ -167,8 +204,7 @@ func (kv *KVServer) killed() bool {
 // StartKVServer() must return quickly, so it should start goroutines for any
 // long-running work.
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	// call labgob.Register on structures you want
-	// Go's RPC library to marshall/unmarshall.
+	// call labgob.Register on structures you want Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})
 
 	kv := new(KVServer)
@@ -179,7 +215,7 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 	kv.applyCh = make(chan raft.ApplyMsg)
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 	kv.waitingOps = make(map[int]chan Op)
-	kv.comittedHist = make(map[int]bool)
+	kv.processed = make(map[int]int)
 
 	go kv.ApplyOperations() // waits for raft commits async
 

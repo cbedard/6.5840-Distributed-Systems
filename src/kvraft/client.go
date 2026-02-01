@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"math/rand/v2"
-	"sync"
 	"time"
 
 	"6.5840/labrpc"
@@ -11,23 +10,27 @@ import (
 type Clerk struct {
 	servers       []*labrpc.ClientEnd
 	currentServer int
-	sync.Mutex
+	clientId      int
+	requestId     int
+	// sync.Mutex, the tester only over calls methods in client.go sequentially after receving an OK
 }
 
 func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 	ck := new(Clerk)
 	ck.servers = servers
-	ck.currentServer = 0
-
+	ck.clientId = int(rand.Int64())
 	return ck
 }
 
-func (ck *Clerk) nextServer() {
-	ck.Lock()
-	defer ck.Unlock()
-
+func (ck *Clerk) nextServer() int {
 	ck.currentServer++
 	ck.currentServer %= len(ck.servers)
+	return ck.currentServer
+}
+
+func (ck *Clerk) nextRequestId() int {
+	ck.requestId++
+	return ck.requestId
 }
 
 // Fetch the current value for a key. Returns "" if the key does not exist.
@@ -41,12 +44,12 @@ func (ck *Clerk) nextServer() {
 // the declared types of the RPC handler function's arguments, and reply must be
 // passed as a pointer.
 func (ck *Clerk) Get(key string) string {
-	uuid := int(rand.Int64())
-	args := &GetArgs{uuid, key}
+	args := &GetArgs{ck.clientId, ck.nextRequestId(), key}
 
 	for {
-		server := ck.currentServer
+		server := ck.nextServer()
 		reply := &GetReply{}
+
 		ok := callWithTimeout(func() bool {
 			return ck.servers[server].Call("KVServer.Get", args, reply)
 		}, 200*time.Millisecond)
@@ -54,7 +57,6 @@ func (ck *Clerk) Get(key string) string {
 		if ok && reply.Err == OK {
 			return reply.Value
 		}
-		ck.nextServer()
 	}
 }
 
@@ -63,12 +65,12 @@ func (ck *Clerk) Get(key string) string {
 // the declared types of the RPC handler function's arguments, and reply must be
 // passed as a pointer.
 func (ck *Clerk) PutAppend(key string, value string, op string) {
-	uuid := int(rand.Int64())
-	args := &PutAppendArgs{uuid, key, value}
+	args := &PutAppendArgs{ck.clientId, ck.nextRequestId(), key, value}
 
 	for {
-		server := ck.currentServer
+		server := ck.nextServer()
 		reply := &PutAppendReply{}
+
 		ok := callWithTimeout(func() bool {
 			return ck.servers[server].Call("KVServer."+op, args, reply)
 		}, 200*time.Millisecond)
@@ -76,7 +78,6 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 		if ok && reply.Err == OK {
 			return
 		}
-		ck.nextServer()
 	}
 }
 

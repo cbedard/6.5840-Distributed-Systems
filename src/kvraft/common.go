@@ -23,9 +23,10 @@ type Reply interface {
 
 // Put or Append
 type PutAppendArgs struct {
-	Uuid  int
-	Key   string
-	Value string
+	ClientId  int
+	RequestId int
+	Key       string
+	Value     string
 }
 
 type PutAppendReply struct {
@@ -33,8 +34,9 @@ type PutAppendReply struct {
 }
 
 type GetArgs struct {
-	Uuid int
-	Key  string
+	ClientId  int
+	RequestId int
+	Key       string
 }
 
 type GetReply struct {

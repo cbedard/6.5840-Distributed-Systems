@@ -94,6 +94,10 @@ func (rf *Raft) GetState() (int, bool) {
 	return rf.currentTerm, rf.state == "LEADER"
 }
 
+func (rf *Raft) RaftStateSize() int {
+	return rf.persister.RaftStateSize()
+}
+
 // persist Raft's persistent state to stable storage, where it can later be retrieved after a crash and restart.
 // is meant to capture value changes in Raft struct so should be called while holding rf.mu
 func (rf *Raft) persist() {
@@ -136,6 +140,11 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
+	// staleness check, can happen if a recently rebooted server tries to snapshot
+	if index <= rf.snap.Index {
+		return
+	}
+
 	// Get term before trimming
 	snapshotTerm := rf.log[rf.toPhysical(index)].Term
 	rf.log = rf.log[rf.toPhysical(index)+1:]
@@ -149,7 +158,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	defer rf.mu.Unlock()
 
 	reply.Term = rf.currentTerm
-	if args.Term < rf.currentTerm || args.LastLogIndex <= rf.snap.Index {
+	if args.Term < rf.currentTerm || args.LastLogIndex <= rf.snap.Index || args.LastLogIndex <= rf.lastApplied {
 		return
 	}
 
