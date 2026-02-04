@@ -2,7 +2,6 @@ package kvraft
 
 import (
 	"bytes"
-	"log"
 	"sync"
 	"sync/atomic"
 
@@ -10,15 +9,6 @@ import (
 	"6.5840/labrpc"
 	"6.5840/raft"
 )
-
-const Debug = false
-
-func DPrintf(format string, a ...interface{}) (n int, err error) {
-	if Debug {
-		log.Printf(format, a...)
-	}
-	return
-}
 
 type Op struct {
 	ClientId  int

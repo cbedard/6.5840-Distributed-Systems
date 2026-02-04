@@ -14,8 +14,6 @@ package shardctrler
 // #0 is the initial configuration, with no groups and all shards
 // assigned to group 0 (the invalid group).
 //
-// You will need to add fields to the RPC argument structs.
-//
 
 // The number of shards.
 const NShards = 10
@@ -24,8 +22,16 @@ const NShards = 10
 // Please don't change this.
 type Config struct {
 	Num    int              // config number
-	Shards [NShards]int     // shard -> gid
-	Groups map[int][]string // gid -> servers[]
+	Shards [NShards]int     // shard -> group id
+	Groups map[int][]string // group id -> servers[]
+}
+
+func copyConfig(c Config) Config {
+	newConfig := Config{Num: c.Num, Shards: c.Shards, Groups: make(map[int][]string)}
+	for gid, servers := range c.Groups {
+		newConfig.Groups[gid] = servers
+	}
+	return newConfig
 }
 
 const (
@@ -34,7 +40,13 @@ const (
 
 type Err string
 
+type RequestHeader struct {
+	ClientId  int
+	RequestId int
+}
+
 type JoinArgs struct {
+	RequestHeader
 	Servers map[int][]string // new GID -> servers mappings
 }
 
@@ -44,6 +56,7 @@ type JoinReply struct {
 }
 
 type LeaveArgs struct {
+	RequestHeader
 	GIDs []int
 }
 
@@ -53,6 +66,7 @@ type LeaveReply struct {
 }
 
 type MoveArgs struct {
+	RequestHeader
 	Shard int
 	GID   int
 }
@@ -63,6 +77,7 @@ type MoveReply struct {
 }
 
 type QueryArgs struct {
+	RequestHeader
 	Num int // desired config number
 }
 
